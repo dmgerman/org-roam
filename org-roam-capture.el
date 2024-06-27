@@ -416,12 +416,10 @@ org-roam-capture can be called:
 
 "
   (let* ((props (plist-put props :call-location (point-marker)))
-         (_ (message "--- 1"))
          (org-capture-templates
           (mapcar (lambda (template)
                     (org-roam-capture--convert-template template props))
                   (or templates org-roam-capture-templates)))
-         (_ (message "--- 2"))
          )
     (setq org-roam-capture--node node)
     (when org-roam-capture--node

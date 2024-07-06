@@ -521,7 +521,10 @@ capture target."
          ;; get the path parameter
          (path (nth 1 (org-roam-capture--get-target)))
          ;; convert to actual path
-         (true-path (org-roam-capture--target-truepath path))
+         (true-path (if (functionp path)
+                        (path)
+                      (org-roam-capture--target-truepath path)
+                        ))
          ;; is it new
          (new-file-p (org-roam-capture--new-file-p true-path))
          ;; get create-file option from template

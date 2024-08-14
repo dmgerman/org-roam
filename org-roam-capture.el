@@ -757,7 +757,7 @@ Return the ID of the location."
                      (org-roam-capture--setup-target-location-node))
                     ((or (string= target "file")
                          (string= target "file+olp")
-                         (string= target "file+headline")
+                         (string= target "file+head")
                          )
                      (org-roam-capture--setup-target-location-file)
                      )
@@ -855,10 +855,11 @@ you can catch it with `condition-case'."
              end (save-excursion (org-end-of-subtree t t))))
      (point-marker))))
 
-(defun org-roam-find-heading-in-subtree (heading)
+(defun org-roam-find-heading-in-subtree (heading level)
   "Search for a heading in the current subtree."
   (save-restriction
-    (org-narrow-to-subtree)
+    (when (> level 1)
+      (org-narrow-to-subtree))
     (goto-char (point-min))
     (message "find heading [%S]" heading)
     (if (re-search-forward (concat "^\\*+ " (regexp-quote heading)) nil t)
@@ -874,7 +875,7 @@ an error, and if you need to do something based on this error,
 you can catch it with `condition-case'."
   (message "Here create heading 3 [%S] level [%S]" heading (org-current-level))
   (let* (
-         (level (+ 1 (org-current-level)))
+         (level (+ 1 (or (org-current-level) 0 )))
          )
     (unless (derived-mode-p 'org-mode)
       (error "Buffer %s needs to be in Org mode" (current-buffer)))
@@ -882,9 +883,10 @@ you can catch it with `condition-case'."
     (org-with-wide-buffer
      
      (message "here 3.6 heading [%s] position [%S]" heading (point))
+     (message "here 3.7 current level [%S]" (org-current-level))
 
      
-     (if (org-roam-find-heading-in-subtree heading)
+     (if (org-roam-find-heading-in-subtree heading level)
          (progn
            (message "Bingo, we find it")
 ;           (org-end-of-subtree t t)

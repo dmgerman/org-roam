@@ -541,48 +541,57 @@ capture target."
   )
 
 
-(defun org-roam-capture--verify-file-parms ()
-  "Verify file related parameters in capture template. "
+(defun org-roam-capture--get-true-path ()
+  "Verify file related parameters in capture template. Create file and directory if necessary"
   ;; this needs to be cleaned along with its caller
 
   (let (
         (path (nth 1 (org-roam-capture--get-target)))
         )
+    
     (when (not path)
       (error "template did not have a target parameter %S" (org-roam-capture--get-target)))
-
-    (when (not (functionp path))
-      (let* (
-        ;; convert to actual path
-        (true-path (and path
-                        (if (functionp path)
-                            nil
-                          (org-roam-capture--target-truepath path)
-                          )))
-        ;; is it new
-        (new-file-p (org-roam-capture--new-file-p true-path))
-        ;; get create-file option from template
-        (create-file  (org-roam-capture--get :create-file))
-        )
-      
-       (when create-file
-         (when (not (or (eq create-file 'no)
-                        (eq create-file 'yes)))
-           (error "Template has illegal create option [%S]. It should either yes or no" create-file)
+    
+    (let* (
+           ;; convert to actual path,
+           ;; if we have a function
+           (resolved-path (if (functionp path)
+                              (funcall path)
+                            path
+                            ))
+           (true-path (org-roam-capture--target-truepath resolved-path))
+           ;; is it new
+           (new-file-p (org-roam-capture--new-file-p true-path))
+           ;; get create-file option from template
+           (create-file  (org-roam-capture--get :create-file))
            )
-    ;; file does not exist and create-file no
-         (when (and new-file-p
-                    (equal create-file 'no))
-           (error "Template :create-file option [%S] requires destination file must exist [%S]" (org-roam-capture--get :create-file) true-path)
-      )
-    ;; file exist and create-file yes
-         (when (and (not new-file-p)
-                    (equal create-file 'yes)
-                    )
-           (error "Template :create-file option [%S] requires destination file does not exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
-           ))
-       ))))
+      (message ">>>>>>>>>>>>>>>>path [%S]>>>>>>>>>>>>>The true path is [%S]" path true-path)
+      (when create-file
+        (when (not (or (eq create-file 'no)
+                       (eq create-file 'yes)))
+          (error "Template has illegal create option [%S]. It should either yes or no" create-file)
+          )
+        ;; file does not exist and create-file no
+        (when (and new-file-p
+                   (equal create-file 'no))
+          (error "Template :create-file option [%S] requires destination file must exist [%S]" (org-roam-capture--get :create-file) true-path)
+          )
+        ;; file exist and create-file yes
+        (when (and (not new-file-p)
+                   (equal create-file 'yes)
+                   )
+          (error "Template :create-file option [%S] requires destination file does not exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
+          ))
+      ;; return true-path
+      (message "-----------------> New file2 [%S] [%S] [%S]"
+               (org-roam-capture--new-file-p true-path)
+               (file-exists-p true-path)
+               (org-find-base-buffer-visiting true-path)
+               )
 
+
+      true-path
+      )))
 
 (defun org-roam-capture--setup-target-location-file ()
   "set up a template destination when a file is required.
@@ -591,11 +600,13 @@ capture target."
   ;; with the new create-file option, this can be forced with
   ;;    org-roam-node-read
   ;; set the node if missing
-;  (message "TARGET 1>>>>>>>>>>> [%S]" (org-roam-capture--get-target))
-;  (message "TARGET 2>>>>>>>>>>> [%S]" (nth 1 (org-roam-capture--get-target)))
-;  (message "TARGET 3>>>>>>>>>>> [%S]" (functionp (nth 1 (org-roam-capture--get-target))))
+  (message "TARGET 1>>>>>>>>>>> [%S]" (org-roam-capture--get-target))
+  (message "TARGET 2>>>>>>>>>>> [%S]" (nth 1 (org-roam-capture--get-target)))
+  (message "TARGET 3>>>>>>>>>>> [%S]" (functionp (nth 1 (org-roam-capture--get-target))))
+  ;; Some error checking
+
   (when (not org-roam-capture--node)
-    ;; ask for the node
+    ;; ask for the node if not provided
     (let ((node (org-roam-node-read nil (org-roam-capture--get :filter-fn)
                                     nil (eq (org-roam-capture--get :create-file) 'no)
                                     ))
@@ -606,34 +617,30 @@ capture target."
       )
     )
   
-  ;; Some error checking
-  (org-roam-capture--verify-file-parms)
-
-
   (let* (position!  ;; mutable value
                     ;; will contain return position
          ;; get the path parameter
-         (path (nth 1 (org-roam-capture--get-target)))
-         ;; convert to actual path
-         (true-path (and path
-                         (if (functionp path)
-                             nil
-                           (org-roam-capture--target-truepath path)
-                        )))
+         (true-path (org-roam-capture--get-true-path))
+
          ;; is it new
          (new-file-p (and true-path
                       (org-roam-capture--new-file-p true-path)))
-         ;; get create-file option from template
-         (create-file  (org-roam-capture--get :create-file))
          )
-    
-    
+
+    (message "-----------------> New file n [%S] [%S]" new-file-p true-path)
+    (message "-----------------> New file2 [%S] [%S] [%S]"
+             (org-roam-capture--new-file-p true-path)
+             (file-exists-p true-path)
+             (org-find-base-buffer-visiting true-path)
+             )
+
     (when true-path
       (when new-file-p
         (org-roam-capture--put :new-file true-path))
       (set-buffer (org-capture-target-buffer true-path))
       )
-    
+
+    (message "It got here>>>>>>>>>>>>>>>>>")
     (pcase (org-roam-capture--get-target)
       (`(file ,path)
        (widen)
@@ -700,23 +707,35 @@ capture target."
   (let* ((title-or-id    (nth 1 (org-roam-capture--get-target)) )
          ;; first try to get ID, then try to get title/alias
          (node (org-roam-capture--find-node-title-id title-or-id))
-        (position! nil)
+         (position (org-roam-node-point node ))
         )
     (setq org-roam-capture--node node)
+    (message "XXXXX [%S] position" org-roam-capture--node
+       )
+    (message "XXXXX  position [%S]" (org-roam-node-point node )
+             )
     (set-buffer (org-capture-target-buffer (org-roam-node-file node)))
+    (widen)
+    (goto-char position)
+    
     (pcase (org-roam-capture--get-target)
       (`(node ,title-or-id)
-       (widen)
-       (setq position! (goto-char (point-min))))
-      (`(node+olp ,title-or-id ,olp)
-       (setq position! (point-min))
-       (let ((m (org-roam-capture-find-or-create-olp olp)))
+       ;(widen)
+                                        ;(setq position! )
+       ;; we are already there... go the end of the node
+;;;;       (org-end-of-subtree)
+;;; do nothing
+       (point)
+       )
+      (`(node+headline ,title-or-id ,head)
+       (message "Here...[%S] [%S]" title-or-id head)
+       (let ((m (org-roam-capture-find-or-create-heading head)))
          (goto-char m))
-       (widen))
+       )
       
       (_ (error "Invalid org-roam capture specification %S" (org-roam-capture--get-target)))
       )
-    position!
+    (point)
     )
   )
 
@@ -725,26 +744,43 @@ capture target."
 Return the ID of the location."
   ;; if the target is a node... then 
   ;; otherwise
+  (message "12.0")
   (let* (
         ;; different processing to node or non-node
          ;; node does not ask for node
          (target (car (org-roam-capture--get-target)))
+         ;; +headline and +olp do not set an id
+         ;; the ID Is inherited
+         (inherit-id (not (or (string= target "node")
+                              (string= target "file"))))
          ;; set the destination
-         (position (cond ((or (string= target "node")
-                             (string= target "node+olp")
-                          ) (org-roam-capture--setup-target-location-node))
-                        ((string= target "function" )
-                         (org-roam-capture--setup-target-location-function)
+         (position (cond
+                    ((or (string= target "node")
+                         (string= target "node+olp")
+                         (string= target "node+headline")
+                      )
+                     (message "12.05")
+                     (org-roam-capture--setup-target-location-node))
+                    ((or (string= target "file")
+                         (string= target "file+olp")
+                         (string= target "file+headline")
                          )
-                        (t (org-roam-capture--setup-target-location-file))                    
-                        ))
+                     (org-roam-capture--setup-target-location-file)
+                     )
+                    ((string= target "function" )
+                     (org-roam-capture--setup-target-location-function)
+                     )
+                    (t (error "Invalid target in template [%S]" target))
+                    ))
         )
     ;; Setup `org-id' for the current capture target and return it back to the
     ;; caller.
+    (message "12.1")
     (save-excursion
       (assert position "No position given")
       (goto-char position)
-      (if-let ((id (org-entry-get position "ID")))
+      ;; the node id should be inherited
+      (if-let ((id (org-entry-get position "ID" inherit-id)))
           (setf (org-roam-node-id org-roam-capture--node) id)
         (org-entry-put position "ID" (org-roam-node-id org-roam-capture--node)))
       (prog1
@@ -777,6 +813,7 @@ it."
 If OLP does not exist, create it. If anything goes wrong, throw
 an error, and if you need to do something based on this error,
 you can catch it with `condition-case'."
+  (message "Here 3 [%S]" olp)
   (let* ((level 1)
          (lmin 1)
          (lmax 1)
@@ -785,13 +822,16 @@ you can catch it with `condition-case'."
          found flevel)
     (unless (derived-mode-p 'org-mode)
       (error "Buffer %s needs to be in Org mode" (current-buffer)))
+    (message "Here 3.1")
     (org-with-wide-buffer
      (goto-char start)
      (dolist (heading olp)
+       (message "here 3.6 heading [%s]" heading)
        (setq heading (org-roam-capture--fill-template heading))
        (let ((re (format org-complex-heading-regexp-format
                          (regexp-quote heading)))
              (cnt 0))
+         (message "Here 4")
          (while (re-search-forward re end t)
            (setq level (- (match-end 1) (match-beginning 1)))
            (when (and (>= level lmin) (<= level lmax))
@@ -800,6 +840,7 @@ you can catch it with `condition-case'."
            (error "Heading not unique on level %d: %s" lmax heading))
          (when (= cnt 0)
            ;; Create heading if it doesn't exist
+           (message "Here 5")
            (goto-char end)
            (unless (bolp) (newline))
            (let (org-insert-heading-respect-content)
@@ -814,10 +855,58 @@ you can catch it with `condition-case'."
              (when (and (>= level lmin) (<= level lmax))
                (setq found (match-beginning 0) flevel level cnt (1+ cnt))))))
        (goto-char found)
+       (message "Here 6")
        (setq lmin (1+ flevel) lmax (+ lmin (if org-odd-levels-only 1 0)))
        (setq start found
              end (save-excursion (org-end-of-subtree t t))))
      (point-marker))))
+
+(defun org-roam-find-heading-in-subtree (heading)
+  "Search for a heading in the current subtree."
+  (save-restriction
+    (org-narrow-to-subtree)
+    (goto-char (point-min))
+    (message "find heading [%S]" heading)
+    (if (re-search-forward (concat "^\\*+ " (regexp-quote heading)) nil t)
+        (point)
+      nil)
+    ))
+
+
+(defun org-roam-capture-find-or-create-heading (heading)
+  "Return a marker pointing to the entry at HEADING in the current buffer.
+If HEADING does not exist, create it. If anything goes wrong, throw
+an error, and if you need to do something based on this error,
+you can catch it with `condition-case'."
+  (message "Here create heading 3 [%S] level [%S]" heading (org-current-level))
+  (let* (
+         (level (+ 1 (org-current-level)))
+         )
+    (unless (derived-mode-p 'org-mode)
+      (error "Buffer %s needs to be in Org mode" (current-buffer)))
+    (message "Here 3.1 Level [%S] [%S]" level heading)
+    (org-with-wide-buffer
+     
+     (message "here 3.6 heading [%s] position [%S]" heading (point))
+
+     
+     (if (org-roam-find-heading-in-subtree heading)
+         (progn
+           (message "Bingo, we find it")
+;           (org-end-of-subtree t t)
+           )
+       (progn
+         (message "We don't have it")
+         (let (org-insert-heading-respect-content)
+           (org-insert-heading '(4) nil level))
+         (insert heading)
+         ))
+     (message "here 4 heading [%s] position [%S]" heading (point))
+
+     (point-marker))))
+
+
+
 
 (defun org-roam-capture--adjust-point-for-capture-type (&optional pos)
   "Reposition the point for template insertion dependently on the capture type.

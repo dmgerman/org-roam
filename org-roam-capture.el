@@ -422,6 +422,7 @@ org-roam-capture can be called:
       (setq org-roam-capture--node node)
       )
     (setq org-roam-capture--info info)
+
     (when (and (not keys)
                (= (length org-capture-templates) 1))
       (setq keys (caar org-capture-templates)))
@@ -610,31 +611,44 @@ capture target."
       (setq org-roam-capture--node node)
       )
     )
-  
   (let* (position!  ;; mutable value
                     ;; will contain return position
          ;; get the path parameter
-         (true-path (org-roam-capture--get-true-path))
-
+         (path-or-function (nth 1 (org-roam-capture--get-target)))
+         ;; convert to actual path
+         (true-path (org-roam-capture--target-truepath path-or-function))
          ;; is it new
-         (new-file-p (and true-path
-                      (org-roam-capture--new-file-p true-path)))
+         (new-file-p (org-roam-capture--new-file-p true-path))
+         ;; get create-file option from template
+         (create-file  (org-roam-capture--get :create-file))
          )
-
-    (message "-----------------> New file n [%S] [%S]" new-file-p true-path)
-    (message "-----------------> New file2 [%S] [%S] [%S]"
-             (org-roam-capture--new-file-p true-path)
-             (file-exists-p true-path)
-             (org-find-base-buffer-visiting true-path)
-             )
-
-    (when true-path
-      (when new-file-p
-        (org-roam-capture--put :new-file true-path))
-      (set-buffer (org-capture-target-buffer true-path))
+    ;; Some error checking
+    (when (not path-or-function)
+      (error "template did not have a path parameter %S" (org-roam-capture--get-target))
       )
+    ;; check create-file option.
+    (when create-file
+      (when (not (or (eq create-file 'no)
+                     (eq create-file 'yes)))
+        (error "Template has illegal create option [%S]. It should either yes or no" create-file)
+        )
+      ;; file does not exist and create-file no
+      (when (and new-file-p
+                 (equal create-file 'no))
+        (error "Template :create-file option [%S] requires destination file must exist [%S]" (org-roam-capture--get :create-file) true-path)
+        )
+      ;; file exist and create-file yes
+      (when (and (not new-file-p)
+                 (equal create-file 'yes)
+                 )
+        (error "Template :create-file option [%S] requires destination file does not exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
+        ))
+    (when new-file-p (org-roam-capture--put :new-file true-path))
 
-    (message "It got here>>>>>>>>>>>>>>>>>")
+    (when (stringp path-or-function)
+      ;; only set the path if path-or-function is a string
+      (set-buffer (org-capture-target-buffer true-path))  
+      )
     (pcase (org-roam-capture--get-target)
       (`(file ,path)
        (widen)
@@ -661,9 +675,53 @@ capture target."
          (goto-char m)))
       
       (`(file+datetree ,path ,tree-type)
-       (org-roam-capture--setup--file-date-tree tree-type)
-       (setq position (point)))
-      (_ (error "Invalid org-roam capture specification %S" (org-roam-capture--get-target)))
+       (require 'org-datetree)
+       (widen)
+       (funcall
+        (pcase tree-type
+          (`week #'org-datetree-find-iso-week-create)
+          (`month #'org-datetree-find-month-create)
+          (`day #'org-datetree-find-date-create)
+          (_ (error "Invalid datetree interval %S" tree-type))
+          )
+        
+        (calendar-gregorian-from-absolute
+         (cond
+          (org-overriding-default-time
+           ;; Use the overriding default time.
+           (time-to-days org-overriding-default-time))
+          ((org-capture-get :default-time)
+           (time-to-days (org-capture-get :default-time)))
+          ((org-capture-get :time-prompt)
+           ;; Prompt for date.  Bind `org-end-time-was-given' so
+           ;; that `org-read-date-analyze' handles the time range
+           ;; case and returns `prompt-time' with the start value.
+           (let* ((org-time-was-given nil)
+                  (org-end-time-was-given nil)
+                  (prompt-time (org-read-date
+                                nil t nil "Date for tree entry:")))
+             (org-capture-put
+              :default-time
+              (if (or org-time-was-given
+                      (= (time-to-days prompt-time) (org-today)))
+                  prompt-time
+                ;; Use 00:00 when no time is given for another
+                ;; date than today?
+                (apply #'encode-time 0 0
+                       org-extend-today-until
+                       (cl-cdddr (decode-time prompt-time)))))
+             (time-to-days prompt-time)))
+          (t
+           ;; Current date, possibly corrected for late night
+           ;; workers.
+           (org-today)))))
+       (setq position! (point)))
+
+      (`(function ,f)
+       (setq position! (point)))
+      
+      (_ (error "Invalid XXX org-roam capture specification %S" (org-roam-capture--get-target)))
+
       )
     position!
     )    

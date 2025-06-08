@@ -575,7 +575,7 @@ capture target."
         (when (and (not new-file-p)
                    (equal create-file 'yes)
                    )
-          (error "Template :create-file option [%S] requires destination file does not exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
+          (error "Template :create-file option [%S] requires destination  file not to exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
           ))
       ;; return true-path
       (message "-----------------> New file2 [%S] [%S] [%S]"
@@ -730,13 +730,12 @@ capture target."
 (defun org-roam-capture--setup-target-location-function ()
   "set up a template destination when a function is given"
   (let*(
-        (path (nth 1 (org-roam-capture--get-target)))
-        (node (funcall path))
-        (point (point))
+        (f (nth 1 (org-roam-capture--get-target)))
+        (node (funcall f))
         )
-    (assert node "We don't have a node")
+    (assert node nil "Setup target function should have returned a node")
     (setq org-roam-capture--node node)
-    point
+    (point)
     )
   )
   
@@ -920,11 +919,13 @@ you can catch it with `condition-case'."
       (org-narrow-to-subtree))
     (goto-char (point-min))
     (message "find heading [%S]" heading)
-    (if (re-search-forward (concat "^\\*+ " (regexp-quote heading)) nil t)
+    (let((re-exp (format org-complex-heading-regexp-format
+		      (regexp-quote heading))
+         )
+        )
+      (if (re-search-forward re-exp nil t)
         (point)
-      nil)
-    ))
-
+        nil))))
 
 (defun org-roam-capture-find-or-create-heading (heading)
   "Return a marker pointing to the entry at HEADING in the current buffer.
@@ -970,11 +971,19 @@ POS is the current position of point (an integer) inside the
 currently active capture buffer, where the adjustment should
 start to begin from. If it's nil, then it will default to
 the current value of `point'."
+  (message ">>>>>>>>>>>>>oooooooooooooooo last one [%S][%S] is f [%S][%S]" pos (point)
+           (org-roam-capture--get-target)
+           (functionp (nth 0 (org-roam-capture--get-target)))
+           )
   (or pos (setq pos (point)))
   (goto-char pos)
   (let ((location-type (if (= pos 1) 'beginning-of-file 'heading-at-point)))
     (and (eq location-type 'heading-at-point)
+         ;; only assert if it is not a function
+         ;; if it is a function, the function takes FULL responsibility
+         (not (functionp (nth 0 (org-roam-capture--get-target))))
          (cl-assert (org-at-heading-p)))
+    (message "We passed..................................")
     (pcase (org-capture-get :type)
       (`plain
        (cl-case location-type
@@ -1084,6 +1093,8 @@ When ENSURE-NEWLINE, always ensure there's a newline behind."
                       ;; string, nothing else to do
                       ((pred stringp)
                        template)
+                      ((pred functionp)
+                       (funcall template))
                       ;; call function to create template
                       ;; not sure why it is a cons
                       (`(function . (,fn))

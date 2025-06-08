@@ -1066,15 +1066,34 @@ This function is to be called in the Org-capture finalization process."
                             id
                             description)))))
 
+;;; 
+(defun org-roam-read-file (path)
+  "Read the contents of PATH relative to  `org-roam-directory`."
+  (let ((fullpath (expand-file-name path org-roam-directory)))
+    (with-temp-buffer
+      (insert-file-contents fullpath)
+      (buffer-string))))
+
 ;;;; Processing of the capture templates
 (defun org-roam-capture--fill-template (template &optional ensure-newline)
   "Expand TEMPLATE and return it.
 It expands ${var} occurrences in TEMPLATE, and then runs
 org-capture's template expansion.
 When ENSURE-NEWLINE, always ensure there's a newline behind."
-  (let* ((template (if (functionp template)
-                       (funcall template)
-                     template))
+  (let* ((template  (pcase template
+                      ;; string, nothing else to do
+                      ((pred stringp)
+                       template)
+                      ;; call function to create template
+                      ;; not sure why it is a cons
+                      (`(function . (,fn))
+                       (funcall fn))
+                      ;; file, load it
+                      ;; not sure why it is a cons
+                      (`(file . (,path))
+                       (org-roam-read-file path))
+                      (_ (error "Unknown template type [%S]" template))))
+                                        ;
          (template-whitespace-content (org-roam-whitespace-content template)))
     (setq template
           (org-roam-format-template

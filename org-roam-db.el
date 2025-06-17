@@ -404,7 +404,7 @@ INFO is the org-element parsed buffer."
            (todo (nth 2 heading-components))
            (priority (nth 3 heading-components))
            (level (nth 1 heading-components))
-           (pos (- (point) 1 level))
+           (pos (point))
            (scheduled (org-roam-db-get-scheduled-time))
            (deadline (org-roam-db-get-deadline-time))
            (title (or (nth 4 heading-components)

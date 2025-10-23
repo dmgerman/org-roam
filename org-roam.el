@@ -232,12 +232,56 @@ FILE is an Org-roam file if:
          valid-file-ext-p
          (not match-exclude-regexp-p))))))
 
+(defun org-roam-file-p--fast (file dir-truename suffix-list exclude-patterns)
+  "Fast variant of `org-roam-file-p' that uses pre-computed directory metadata.
+
+FILE: the file path to check
+DIR-TRUENAME: pre-computed truename of `org-roam-directory'
+SUFFIX-LIST: pre-computed list of valid suffixes
+EXCLUDE-PATTERNS: pre-computed list of exclude patterns (or nil)
+
+This skips expensive operations that have already been done, making it
+suitable for batch operations like `org-roam-list-files'."
+  (and
+   ;; Quick extension check (string operations only)
+   (cl-some (lambda (suffix) (string-suffix-p suffix file)) suffix-list)
+   ;; Check if under directory using pre-computed truename
+   (string-prefix-p dir-truename (file-truename file))
+   ;; Check exclusion patterns
+   (not (and exclude-patterns
+             (cl-some (lambda (pattern)
+                        (string-match-p pattern
+                                        (file-relative-name file dir-truename)))
+                      exclude-patterns)))))
+
+(defun org-roam--prepare-list-files-context ()
+  "Prepare metadata for batch file checking in `org-roam-list-files'.
+
+Returns a cons cell of (DIR-TRUENAME . (SUFFIX-LIST . EXCLUDE-PATTERNS))
+containing pre-computed values to avoid redundant filesystem operations."
+  (let* ((dir-expanded (expand-file-name org-roam-directory))
+         (dir-truename (file-truename dir-expanded))
+         (suffix-list (cl-loop for ext in org-roam-file-extensions
+                               append (list (concat "." ext)
+                                            (concat "." ext ".age")
+                                            (concat "." ext ".gpg"))))
+         (exclude-patterns (when org-roam-file-exclude-regexp
+                             (if (stringp org-roam-file-exclude-regexp)
+                                 (list org-roam-file-exclude-regexp)
+                               org-roam-file-exclude-regexp))))
+    (cons dir-expanded (cons dir-truename (cons suffix-list exclude-patterns)))))
+
 ;;;###autoload
 (defun org-roam-list-files ()
   "Return a list of all Org-roam files under `org-roam-directory'.
 See `org-roam-file-p' for how each file is determined to be as
 part of Org-Roam."
-  (org-roam--list-files (expand-file-name org-roam-directory)))
+  (let* ((ctx (org-roam--prepare-list-files-context))
+         (dir-expanded (car ctx))
+         (dir-truename (cadr ctx))
+         (suffix-list (caddr ctx))
+         (exclude-patterns (cdddr ctx)))
+    (org-roam--list-files-with-context dir-expanded dir-truename suffix-list exclude-patterns)))
 
 (defun org-roam-buffer-p (&optional buffer)
   "Return t if BUFFER is for an Org-roam file.
@@ -266,6 +310,19 @@ Like `file-name-extension', but does not strip version number."
 (defun org-roam--list-files (dir)
   "Return all Org-roam files located recursively within DIR.
 Use external shell commands if defined in `org-roam-list-files-commands'."
+  (let ((ctx (org-roam--prepare-list-files-context)))
+    (org-roam--list-files-with-context (car ctx) (cadr ctx) (caddr ctx) (cdddr ctx))))
+
+(defun org-roam--list-files-with-context (dir dir-truename suffix-list exclude-patterns)
+  "Return all Org-roam files located recursively within DIR.
+Use pre-computed metadata to avoid redundant filesystem operations.
+
+DIR: expanded directory path
+DIR-TRUENAME: truename of the directory
+SUFFIX-LIST: list of valid file suffixes
+EXCLUDE-PATTERNS: list of exclude patterns (or nil)
+
+Use external shell commands if defined in `org-roam-list-files-commands'."
   (let (path exe)
     (cl-dolist (cmd org-roam-list-files-commands)
       (pcase cmd
@@ -283,11 +340,10 @@ Use external shell commands if defined in `org-roam-list-files-commands'."
     (if-let* ((files (when path
                        (let ((fn (intern (concat "org-roam--list-files-" exe))))
                          (unless (fboundp fn) (user-error "%s is not an implemented search method" fn))
-                         (funcall fn path (format "\"%s\"" dir)))))
-              (files (seq-filter #'org-roam-file-p files))
+                         (funcall fn path (format "\"%s\"" dir) dir-truename suffix-list exclude-patterns))))
               (files (mapcar #'expand-file-name files))) ; canonicalize names
         files
-      (org-roam--list-files-elisp dir))))
+      (org-roam--list-files-elisp dir dir-truename suffix-list exclude-patterns))))
 
 (defun org-roam--shell-command-files (cmd)
   "Run CMD in the shell and return a list of files.
@@ -307,41 +363,52 @@ E.g. (\".org\") => (\"*.org\" \"*.org.gpg\")"
                         (format "\"*.%s.gpg\"" e)
                         (format "\"*.%s.age\"" e))))
 
-(defun org-roam--list-files-find (executable dir)
-  "Return all Org-roam files under DIR, using \"find\", provided as EXECUTABLE."
+(defun org-roam--list-files-find (executable dir dir-truename suffix-list exclude-patterns)
+  "Return all Org-roam files under DIR, using \"find\", provided as EXECUTABLE.
+
+Uses pre-computed DIR-TRUENAME, SUFFIX-LIST, and EXCLUDE-PATTERNS for fast filtering."
   (let* ((globs (org-roam--list-files-search-globs org-roam-file-extensions))
          (names (string-join (mapcar (lambda (glob) (concat "-name " glob)) globs) " -o "))
-         (command (string-join `(,executable "-L" ,dir "-type f \\(" ,names "\\)") " ")))
-    (org-roam--shell-command-files command)))
+         (command (string-join `(,executable "-L" ,dir "-type f \\(" ,names "\\)") " "))
+         (files (org-roam--shell-command-files command)))
+    (seq-filter (lambda (f) (org-roam-file-p--fast f dir-truename suffix-list exclude-patterns)) files)))
 
-(defun org-roam--list-files-fd (executable dir)
-  "Return all Org-roam files under DIR, using \"fd\", provided as EXECUTABLE."
+(defun org-roam--list-files-fd (executable dir dir-truename suffix-list exclude-patterns)
+  "Return all Org-roam files under DIR, using \"fd\", provided as EXECUTABLE.
+
+Uses pre-computed DIR-TRUENAME, SUFFIX-LIST, and EXCLUDE-PATTERNS for fast filtering."
   (let* ((globs (org-roam--list-files-search-globs org-roam-file-extensions))
          (extensions (string-join (mapcar (lambda (glob) (concat "-e " (substring glob 2 -1))) globs) " "))
-         (command (string-join `(,executable "-L" "--type file" ,extensions "." ,dir) " ")))
-    (org-roam--shell-command-files command)))
+         (command (string-join `(,executable "-L" "--type file" ,extensions "." ,dir) " "))
+         (files (org-roam--shell-command-files command)))
+    (seq-filter (lambda (f) (org-roam-file-p--fast f dir-truename suffix-list exclude-patterns)) files)))
 
 (defalias 'org-roam--list-files-fdfind #'org-roam--list-files-fd)
 
-(defun org-roam--list-files-rg (executable dir)
-  "Return all Org-roam files under DIR, using \"rg\", provided as EXECUTABLE."
+(defun org-roam--list-files-rg (executable dir dir-truename suffix-list exclude-patterns)
+  "Return all Org-roam files under DIR, using \"rg\", provided as EXECUTABLE.
+
+Uses pre-computed DIR-TRUENAME, SUFFIX-LIST, and EXCLUDE-PATTERNS for fast filtering."
   (let* ((globs (org-roam--list-files-search-globs org-roam-file-extensions))
          (command (string-join `(
                                  ,executable "-L" ,dir "--files"
-                                 ,@(mapcar (lambda (glob) (concat "-g " glob)) globs)) " ")))
-    (org-roam--shell-command-files command)))
+                                 ,@(mapcar (lambda (glob) (concat "-g " glob)) globs)) " "))
+         (files (org-roam--shell-command-files command)))
+    (seq-filter (lambda (f) (org-roam-file-p--fast f dir-truename suffix-list exclude-patterns)) files)))
 
 (declare-function org-roam--directory-files-recursively "org-roam-compat")
 
-(defun org-roam--list-files-elisp (dir)
-  "Return all Org-roam files under DIR, using Elisp based implementation."
+(defun org-roam--list-files-elisp (dir dir-truename suffix-list exclude-patterns)
+  "Return all Org-roam files under DIR, using Elisp based implementation.
+
+Uses pre-computed DIR-TRUENAME, SUFFIX-LIST, and EXCLUDE-PATTERNS for fast filtering."
   (let ((regex (concat "\\.\\(?:"(mapconcat
                                   #'regexp-quote org-roam-file-extensions
                                   "\\|" )"\\)\\(?:\\.gpg\\|\\.age\\)?\\'"))
         result)
     (dolist (file (org-roam--directory-files-recursively dir regex nil nil t) result)
       (when (and (file-readable-p file)
-                 (org-roam-file-p file))
+                 (org-roam-file-p--fast file dir-truename suffix-list exclude-patterns))
         (push file result)))))
 
 ;;; Package bootstrap

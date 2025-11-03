@@ -717,9 +717,6 @@ capture target."
            (org-today)))))
        (setq position! (point)))
 
-      (`(function ,f)
-       (setq position! (point)))
-      
       (_ (error "Invalid XXX org-roam capture specification %S" (org-roam-capture--get-target)))
 
       )
@@ -754,10 +751,15 @@ capture target."
   )
 
 (defun org-roam-capture--setup-target-location-node ()
-  "Sets up a destination when the node is known (either by id, title or alias)"
-  (let* ((title-or-id    (nth 1 (org-roam-capture--get-target)) )
-         ;; first try to get ID, then try to get title/alias
-         (node (org-roam-capture--find-node-title-id title-or-id))
+  "Sets up a destination when the node is known (either by id, title or alias, or by a function)"
+  (let* ((target-spec (org-roam-capture--get-target))
+         (target-type (car target-spec))
+         (title-or-id-or-func (nth 1 target-spec))
+         ;; Get node either by title/id or by calling a function
+         (node (if (or (string= target-type "nodefunc")
+                       (string= target-type "nodefunc+headline"))
+                   (funcall title-or-id-or-func)
+                 (org-roam-capture--find-node-title-id title-or-id-or-func)))
          (position (org-roam-node-point node ))
         )
     (setq org-roam-capture--node node)
@@ -783,7 +785,16 @@ capture target."
        (let ((m (org-roam-capture-find-or-create-heading head)))
          (goto-char m))
        )
-      
+      (`(nodefunc ,f)
+       ;; Function returns the node, we're already positioned at it
+       (point)
+       )
+      (`(nodefunc+headline ,f ,head)
+       (message "Here...[%S] [%S]" f head)
+       (let ((m (org-roam-capture-find-or-create-heading head)))
+         (goto-char m))
+       )
+
       (_ (error "Invalid org-roam capture specification %S" (org-roam-capture--get-target)))
       )
     (point)
@@ -800,7 +811,8 @@ Return the ID of the location."
         ;; different processing to node or non-node
          ;; node does not ask for node
          (target (car (org-roam-capture--get-target)))
-         ;; +headline and +olp do not set an id
+         (_   (message "12.1 [%S]" target))
+       ;; +headline and +olp do not set an id
          ;; the ID Is inherited
          (inherit-id (not (or (string= target "node")
                               (string= target "file"))))
@@ -809,6 +821,8 @@ Return the ID of the location."
                     ((or (string= target "node")
                          (string= target "node+olp")
                          (string= target "node+headline")
+                         (string= target "nodefunc")
+                         (string= target "nodefunc+headline")
                       )
                      (message "12.05")
                      (org-roam-capture--setup-target-location-node))
@@ -818,22 +832,24 @@ Return the ID of the location."
                          )
                      (org-roam-capture--setup-target-location-file)
                      )
-                    ((string= target "function" )
-                     (org-roam-capture--setup-target-location-function)
-                     )
                     (t (error "Invalid target in template [%S]" target))
                     ))
         )
     ;; Setup `org-id' for the current capture target and return it back to the
     ;; caller.
-    (message "12.1")
+    (message "12.09 [%S]" position)
+    
     (save-excursion
       (assert position "No position given")
       (goto-char position)
+      
+      (message "12.10 Position [%S]" position)
       ;; the node id should be inherited
+      (message "12.11 Node [%S]" org-roam-capture--node)
       (if-let* ((id (org-entry-get position "ID" inherit-id)))
           (setf (org-roam-node-id org-roam-capture--node) id)
         (org-entry-put position "ID" (org-roam-node-id org-roam-capture--node)))
+      (message "12.12")
       (prog1
           (org-id-get)
         (run-hooks 'org-roam-capture-new-node-hook)))))

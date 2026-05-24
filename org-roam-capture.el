@@ -560,7 +560,6 @@ capture target."
            ;; get create-file option from template
            (create-file  (org-roam-capture--get :create-file))
            )
-      (message ">>>>>>>>>>>>>>>>path [%S]>>>>>>>>>>>>>The true path is [%S]" path true-path)
       (when create-file
         (when (not (or (eq create-file 'no)
                        (eq create-file 'yes)))
@@ -578,11 +577,6 @@ capture target."
           (error "Template :create-file option [%S] requires destination  file not to exist [%S], but it does." (org-roam-capture--get :create-file) true-path)
           ))
       ;; return true-path
-      (message "-----------------> New file2 [%S] [%S] [%S]"
-               (org-roam-capture--new-file-p true-path)
-               (file-exists-p true-path)
-               (org-find-base-buffer-visiting true-path)
-               )
 
 
       true-path
@@ -595,9 +589,6 @@ capture target."
   ;; with the new create-file option, this can be forced with
   ;;    org-roam-node-read
   ;; set the node if missing
-  (message "TARGET 1>>>>>>>>>>> [%S]" (org-roam-capture--get-target))
-  (message "TARGET 2>>>>>>>>>>> [%S]" (nth 1 (org-roam-capture--get-target)))
-  (message "TARGET 3>>>>>>>>>>> [%S]" (functionp (nth 1 (org-roam-capture--get-target))))
   ;; Some error checking
 
   (when (not org-roam-capture--node)
@@ -763,10 +754,6 @@ capture target."
          (position (org-roam-node-point node ))
         )
     (setq org-roam-capture--node node)
-    (message "XXXXX [%S] position" org-roam-capture--node
-       )
-    (message "XXXXX  position [%S]" (org-roam-node-point node )
-             )
     (set-buffer (org-capture-target-buffer (org-roam-node-file node)))
     (widen)
     (goto-char position)
@@ -781,7 +768,6 @@ capture target."
        (point)
        )
       (`(node+headline ,title-or-id ,head)
-       (message "Here...[%S] [%S]" title-or-id head)
        (let ((m (org-roam-capture-find-or-create-heading head)))
          (goto-char m))
        )
@@ -790,7 +776,6 @@ capture target."
        (point)
        )
       (`(nodefunc+headline ,f ,head)
-       (message "Here...[%S] [%S]" f head)
        (let ((m (org-roam-capture-find-or-create-heading head)))
          (goto-char m))
        )
@@ -806,15 +791,9 @@ capture target."
 Return the ID of the location."
   ;; if the target is a node... then 
   ;; otherwise
-  (message "12.0")
   (let* (
-        ;; different processing to node or non-node
-         ;; node does not ask for node
-         (target (car (org-roam-capture--get-target)))
-         (_   (message "12.1 [%S]" target))
-       ;; +headline and +olp do not set an id
-         ;; the ID Is inherited
-         (inherit-id (not (or (string= target "node")
+        (target (car (org-roam-capture--get-target)))
+       (inherit-id (not (or (string= target "node")
                               (string= target "file"))))
          ;; set the destination
          (position (cond
@@ -824,7 +803,6 @@ Return the ID of the location."
                          (string= target "nodefunc")
                          (string= target "nodefunc+headline")
                       )
-                     (message "12.05")
                      (org-roam-capture--setup-target-location-node))
                     ((or (string= target "file")
                          (string= target "file+olp")
@@ -837,19 +815,13 @@ Return the ID of the location."
         )
     ;; Setup `org-id' for the current capture target and return it back to the
     ;; caller.
-    (message "12.09 [%S]" position)
-    
     (save-excursion
       (assert position "No position given")
       (goto-char position)
-      
-      (message "12.10 Position [%S]" position)
       ;; the node id should be inherited
-      (message "12.11 Node [%S]" org-roam-capture--node)
       (if-let* ((id (org-entry-get position "ID" inherit-id)))
           (setf (org-roam-node-id org-roam-capture--node) id)
         (org-entry-put position "ID" (org-roam-node-id org-roam-capture--node)))
-      (message "12.12")
       (prog1
           (org-id-get)
         (run-hooks 'org-roam-capture-new-node-hook)))))
@@ -880,7 +852,6 @@ it."
 If OLP does not exist, create it. If anything goes wrong, throw
 an error, and if you need to do something based on this error,
 you can catch it with `condition-case'."
-  (message "Here 3 [%S]" olp)
   (let* ((level 1)
          (lmin 1)
          (lmax 1)
@@ -889,16 +860,13 @@ you can catch it with `condition-case'."
          found flevel)
     (unless (derived-mode-p 'org-mode)
       (error "Buffer %s needs to be in Org mode" (current-buffer)))
-    (message "Here 3.1")
     (org-with-wide-buffer
      (goto-char start)
      (dolist (heading olp)
-       (message "here 3.6 heading [%s]" heading)
        (setq heading (org-roam-capture--fill-template heading))
        (let ((re (format org-complex-heading-regexp-format
                          (regexp-quote heading)))
              (cnt 0))
-         (message "Here 4")
          (while (re-search-forward re end t)
            (setq level (- (match-end 1) (match-beginning 1)))
            (when (and (>= level lmin) (<= level lmax))
@@ -907,7 +875,6 @@ you can catch it with `condition-case'."
            (error "Heading not unique on level %d: %s" lmax heading))
          (when (= cnt 0)
            ;; Create heading if it doesn't exist
-           (message "Here 5")
            (goto-char end)
            (unless (bolp) (newline))
            (let (org-insert-heading-respect-content)
@@ -922,7 +889,6 @@ you can catch it with `condition-case'."
              (when (and (>= level lmin) (<= level lmax))
                (setq found (match-beginning 0) flevel level cnt (1+ cnt))))))
        (goto-char found)
-       (message "Here 6")
        (setq lmin (1+ flevel) lmax (+ lmin (if org-odd-levels-only 1 0)))
        (setq start found
              end (save-excursion (org-end-of-subtree t t))))
@@ -934,8 +900,7 @@ you can catch it with `condition-case'."
     (when (> level 1)
       (org-narrow-to-subtree))
     (goto-char (point-min))
-    (message "find heading [%S]" heading)
-    (let((re-exp (format org-complex-heading-regexp-format
+    (let ((re-exp (format org-complex-heading-regexp-format
 		      (regexp-quote heading))
          )
         )
@@ -948,32 +913,15 @@ you can catch it with `condition-case'."
 If HEADING does not exist, create it. If anything goes wrong, throw
 an error, and if you need to do something based on this error,
 you can catch it with `condition-case'."
-  (message "Here create heading 3 [%S] level [%S]" heading (org-current-level))
-  (let* (
-         (level (+ 1 (or (org-current-level) 0 )))
-         )
+  (let* ((level (+ 1 (or (org-current-level) 0))))
     (unless (derived-mode-p 'org-mode)
       (error "Buffer %s needs to be in Org mode" (current-buffer)))
-    (message "Here 3.1 Level [%S] [%S]" level heading)
     (org-with-wide-buffer
-     
-     (message "here 3.6 heading [%s] position [%S]" heading (point))
-     (message "here 3.7 current level [%S]" (org-current-level))
-
-     
      (if (org-roam-find-heading-in-subtree heading level)
-         (progn
-           (message "Bingo, we find it")
-;           (org-end-of-subtree t t)
-           )
-       (progn
-         (message "We don't have it")
-         (let (org-insert-heading-respect-content)
-           (org-insert-heading '(4) nil level))
-         (insert heading)
-         ))
-     (message "here 4 heading [%s] position [%S]" heading (point))
-
+         nil
+       (let (org-insert-heading-respect-content)
+         (org-insert-heading '(4) nil level))
+       (insert heading))
      (point-marker))))
 
 
@@ -987,10 +935,6 @@ POS is the current position of point (an integer) inside the
 currently active capture buffer, where the adjustment should
 start to begin from. If it's nil, then it will default to
 the current value of `point'."
-  (message ">>>>>>>>>>>>>oooooooooooooooo last one [%S][%S] is f [%S][%S]" pos (point)
-           (org-roam-capture--get-target)
-           (functionp (nth 0 (org-roam-capture--get-target)))
-           )
   (or pos (setq pos (point)))
   (goto-char pos)
   (let ((location-type (if (= pos 1) 'beginning-of-file 'heading-at-point)))
@@ -999,7 +943,6 @@ the current value of `point'."
          ;; if it is a function, the function takes FULL responsibility
          (not (functionp (nth 0 (org-roam-capture--get-target))))
          (cl-assert (org-at-heading-p)))
-    (message "We passed..................................")
     (pcase (org-capture-get :type)
       (`plain
        (cl-case location-type

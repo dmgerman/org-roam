@@ -956,9 +956,13 @@ the current value of `point'."
                   (setq el (org-element-at-point))))
             (goto-char (org-entry-end-position))))
          (heading-at-point
-          (if (org-capture-get :prepend)
-              (org-end-of-meta-data t)
-            (goto-char (org-entry-end-position))))))))
+          (when (org-capture-get :prepend)
+            (org-end-of-meta-data t)))))))
+  ;; Non-`:prepend' plain templates leave point at the target heading and
+  ;; delegate the final placement to `org-capture-place-plain-text', which
+  ;; advances to the next heading and inserts before it — landing the text at
+  ;; the end of the target entry.  Advancing here would double-advance and push
+  ;; the text into a sibling subtree.
   (point))
 
 ;;; Capture implementation
